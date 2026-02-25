@@ -93,8 +93,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           
           SafeArea(
-            child: Column(
-              children: [
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 800),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, 30 * (1 - value)),
+                    child: child,
+                  ),
+                );
+              },
+              child: Column(
+                children: [
                 // Judul
                 const Padding(
                   padding: EdgeInsets.only(top: 20, bottom: 20),
@@ -282,6 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                 ),
               ],
+            ),
             ),
           )
         ],
