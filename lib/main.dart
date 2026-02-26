@@ -1,8 +1,8 @@
 import 'package:device_preview/device_preview.dart';
 import 'package:flutter/foundation.dart'; // untuk kReleaseMode
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart'; // Import Google Fonts
 
-import 'ui/home_screen.dart';
 import 'ui/splash_screen.dart';
 
 void main() {
@@ -32,17 +32,19 @@ class MainApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'AI Schedule Generator',
 
-      // Tema global menggunakan Material 3
+      // Tema global menggunakan Material 3 dan Plus Jakarta Sans
       theme: ThemeData(
+        textTheme: GoogleFonts.plusJakartaSansTextTheme(
+          Theme.of(context).textTheme,
+        ),
         colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.indigo, // warna brand utama
+          seedColor: const Color(0xFF6C63FF), // Vibrant purple/indigo
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        scaffoldBackgroundColor: Colors.grey[50],
+        scaffoldBackgroundColor: const Color(0xFFFAFAFA), // Soft light gray
         appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.indigo,
-          foregroundColor: Colors.white,
+          backgroundColor: Colors.transparent, // Default transparan untuk menyatu dengan background custom
           elevation: 0,
           centerTitle: true,
         ),

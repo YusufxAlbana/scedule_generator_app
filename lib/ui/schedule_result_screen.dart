@@ -75,11 +75,19 @@ class ScheduleResultScreen extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF7DE2D1), // Cyan muda / Mint
-                  Color(0xFF4CB8B8), // Teal agak gelap
+                  Color(0xFF8121DA), // Deep Purple
+                  Color(0xFF4C22DC), // Deep Indigo
+                  Color(0xFF1E58E9), // Vibrant Blue
                 ],
               ),
               borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF1E58E9).withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
             child: Column(
               children: [
@@ -87,9 +95,10 @@ class ScheduleResultScreen extends StatelessWidget {
                 const Text(
                   "Daily schedule",
                   style: TextStyle(
-                    color: Color(0xFF1F4A4A), // Dark teal
-                    fontSize: 20,
+                    color: Colors.white,
+                    fontSize: 22,
                     fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -117,7 +126,7 @@ class ScheduleResultScreen extends StatelessWidget {
             ),
           ),
           
-          const SizedBox(height: 32),
+          const SizedBox(height: 40),
           
           // Upcoming Section
           if (upcoming.isNotEmpty)
@@ -125,39 +134,55 @@ class ScheduleResultScreen extends StatelessWidget {
               padding: const EdgeInsets.only(left: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: upcoming.map((e) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 20),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 40,
-                          child: Text(
-                            e['date'] ?? '',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF2E3A42),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: Text(
-                            e['title'] ?? '',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black38,
-                            ),
-                          ),
-                        ),
-                      ],
+                children: [
+                  const Text(
+                    "Upcoming",
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF2E3A42),
                     ),
-                  );
-                }).toList(),
+                  ),
+                  const SizedBox(height: 24),
+                  ...upcoming.map((e) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Container(
+                            width: 60,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E58E9).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              e['date'] ?? '',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1E58E9),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: Text(
+                              e['title'] ?? '',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A5568),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
               ),
             ),
           const SizedBox(height: 40),
@@ -176,14 +201,14 @@ class ScheduleResultScreen extends StatelessWidget {
     required bool isLast,
   }) {
     return Container(
-      color: hasEvent ? Colors.black.withOpacity(0.08) : Colors.transparent,
+      color: hasEvent ? Colors.white.withOpacity(0.08) : Colors.transparent, // Highlight aktif lebih kentara
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Time Column
             SizedBox(
-              width: 70,
+              width: 75,
               child: Padding(
                 padding: const EdgeInsets.only(left: 20, top: 16, bottom: 16),
                 child: Column(
@@ -193,8 +218,8 @@ class ScheduleResultScreen extends StatelessWidget {
                       time,
                       style: TextStyle(
                         color: hasEvent ? Colors.white : Colors.white70,
-                        fontSize: 13,
-                        fontWeight: hasEvent ? FontWeight.w800 : FontWeight.w500,
+                        fontSize: 14,
+                        fontWeight: hasEvent ? FontWeight.w800 : FontWeight.w600,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -216,26 +241,34 @@ class ScheduleResultScreen extends StatelessWidget {
             
             // Line & Dot
             SizedBox(
-              width: 24,
+              width: 32,
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   Positioned(
                     top: isFirst ? 22 : 0,
                     bottom: isLast ? 22 : 0,
-                    width: 1.5,
+                    width: 2.0, // Garis lebih tebal dikit
                     child: Container(
-                      color: Colors.white.withOpacity(0.5),
+                      color: Colors.white.withOpacity(0.3),
                     ),
                   ),
                   Positioned(
                     top: 20, // sejajarkan dengan teks jam
                     child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: hasEvent ? Colors.white : Colors.transparent,
                         shape: BoxShape.circle,
+                        border: hasEvent ? null : Border.all(color: Colors.white70, width: 2),
+                        boxShadow: hasEvent ? [
+                          BoxShadow(
+                            color: Colors.white.withOpacity(0.5),
+                            blurRadius: 10,
+                            spreadRadius: 2,
+                          )
+                        ] : [],
                       ),
                     ),
                   ),
@@ -246,7 +279,7 @@ class ScheduleResultScreen extends StatelessWidget {
             // Content
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(left: 16, top: 18, bottom: 18, right: 16),
+                padding: const EdgeInsets.only(left: 12, top: 18, bottom: 18, right: 16),
                 child: hasEvent
                     ? Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,19 +287,20 @@ class ScheduleResultScreen extends StatelessWidget {
                           Text(
                             title,
                             style: const TextStyle(
-                              color: Color(0xFF1F4A4A),
-                              fontWeight: FontWeight.w900,
-                              fontSize: 15,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
                           if (subtitle.isNotEmpty) ...[
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 6),
                             Text(
                               subtitle,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.85),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
+                                height: 1.3,
                               ),
                             ),
                           ],
