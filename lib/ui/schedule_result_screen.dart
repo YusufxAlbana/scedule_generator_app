@@ -1,45 +1,194 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class ScheduleResultScreen extends StatelessWidget {
   final String scheduleResult;
 
   const ScheduleResultScreen({super.key, required this.scheduleResult});
 
-  @override
-  Widget build(BuildContext context) {
-    Map<String, dynamic>? data;
-    bool isJson = false;
+  // Coba extract JSON dari response (bisa ada teks sebelum/sesudah JSON)
+  Map<String, dynamic>? _tryParseJson(String raw) {
+    // Bersihkan code block markdown
+    String cleaned = raw
+        .replaceAll(RegExp(r'```json\s*', caseSensitive: false), '')
+        .replaceAll(RegExp(r'```\s*'), '')
+        .trim();
 
+    // Coba langsung parse
     try {
-      // Membersihkan markdown wrapper (jika AI membalas pakai block markdown)
-      String cleanJson = scheduleResult
-          .replaceAll(RegExp(r'```json\s*'), '')
-          .replaceAll(RegExp(r'```\s*'), '');
-      data = jsonDecode(cleanJson);
-      
-      // Validasi apakah properti schedule ada
-      if (data != null && data.containsKey('schedule')) {
-        isJson = true;
+      final data = jsonDecode(cleaned);
+      if (data is Map<String, dynamic> && data.containsKey('schedule')) {
+        return data;
       }
-    } catch (e) {
-      isJson = false;
+    } catch (_) {}
+
+    // Coba extract JSON object dari dalam teks
+    final jsonMatch = RegExp(r'\{[\s\S]*"schedule"[\s\S]*\}').firstMatch(cleaned);
+    if (jsonMatch != null) {
+      try {
+        final data = jsonDecode(jsonMatch.group(0)!);
+        if (data is Map<String, dynamic> && data.containsKey('schedule')) {
+          return data;
+        }
+      } catch (_) {}
     }
 
+    return null;
+  }
+
+  // Parse markdown table menjadi list of maps
+  List<Map<String, String>> _parseMarkdownTable(String raw) {
+    final lines = raw.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+    final tableLines = <String>[];
+
+    for (final line in lines) {
+      if (line.startsWith('|') && line.endsWith('|')) {
+        // Skip separator lines like |---|---|
+        if (RegExp(r'^\|[\s\-:]+\|$').hasMatch(line.replaceAll(' ', ''))) continue;
+        tableLines.add(line);
+      }
+    }
+
+    if (tableLines.length < 2) return []; // Butuh minimal header + 1 data row
+
+    // Parse header
+    final headers = tableLines[0]
+        .split('|')
+        .map((h) => h.trim())
+        .where((h) => h.isNotEmpty)
+        .toList();
+
+    // Parse data rows
+    final rows = <Map<String, String>>[];
+    for (int i = 1; i < tableLines.length; i++) {
+      final cells = tableLines[i]
+          .split('|')
+          .map((c) => c.trim())
+          .where((c) => c.isNotEmpty)
+          .toList();
+
+      final row = <String, String>{};
+      for (int j = 0; j < headers.length && j < cells.length; j++) {
+        row[headers[j].toLowerCase()] = cells[j];
+      }
+      rows.add(row);
+    }
+
+    return rows;
+  }
+
+  // Extract tips dari teks setelah tabel
+  String _extractTips(String raw) {
+    final lines = raw.split('\n');
+    final tipLines = <String>[];
+    bool afterTable = false;
+
+    for (final line in lines) {
+      final trimmed = line.trim();
+      if (afterTable && trimmed.isNotEmpty && !trimmed.startsWith('|')) {
+        tipLines.add(trimmed);
+      }
+      if (trimmed.startsWith('|') && !RegExp(r'^\|[\s\-:]+\|$').hasMatch(trimmed.replaceAll(' ', ''))) {
+        afterTable = true;
+      }
+    }
+
+    return tipLines.join(' ').trim();
+  }
+
+  // Build readable text for clipboard
+  String _buildCopyText(Map<String, dynamic> data) {
+    final schedule = List<Map<String, dynamic>>.from(data['schedule'] ?? []);
+    final tips = data['tips'] as String? ?? '';
+
+    final buffer = StringBuffer();
+    buffer.writeln('📅 Jadwal Harian');
+    buffer.writeln('═══════════════════════');
+
+    for (final item in schedule) {
+      if (item['hasEvent'] == true) {
+        buffer.writeln('${item['time']} - ${item['endTime']}  │  ${item['title']}');
+        if (item['subtitle'] != null && (item['subtitle'] as String).isNotEmpty) {
+          buffer.writeln('   ${item['subtitle']}');
+        }
+      }
+    }
+
+    if (tips.isNotEmpty) {
+      buffer.writeln('');
+      buffer.writeln('💡 Tips: $tips');
+    }
+
+    return buffer.toString();
+  }
+
+  String _buildCopyTextFromTable(List<Map<String, String>> rows, String tips) {
+    final buffer = StringBuffer();
+    buffer.writeln('📅 Jadwal Harian');
+    buffer.writeln('═══════════════════════');
+
+    for (final row in rows) {
+      final waktu = row['waktu'] ?? row['time'] ?? '';
+      final aktivitas = row['aktivitas'] ?? row['activity'] ?? row['title'] ?? '';
+      final durasi = row['durasi'] ?? row['duration'] ?? '';
+      final prioritas = row['prioritas'] ?? row['priority'] ?? '';
+      buffer.writeln('$waktu  │  $aktivitas ($durasi) [$prioritas]');
+    }
+
+    if (tips.isNotEmpty) {
+      buffer.writeln('');
+      buffer.writeln('💡 Tips: $tips');
+    }
+
+    return buffer.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Coba parse JSON
+    final jsonData = _tryParseJson(scheduleResult);
+
+    // Kalau JSON berhasil
+    if (jsonData != null) {
+      return _buildScaffold(
+        context,
+        body: _buildCalendarView(context, jsonData),
+      );
+    }
+
+    // Fallback: coba parse markdown table
+    final tableRows = _parseMarkdownTable(scheduleResult);
+    if (tableRows.isNotEmpty) {
+      return _buildScaffold(
+        context,
+        body: _buildMarkdownTableView(context, tableRows),
+      );
+    }
+
+    // Terakhir: tampilkan raw text dengan formatting yang lebih baik
+    return _buildScaffold(
+      context,
+      body: _buildFallbackView(context, scheduleResult),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, {required Widget body}) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF8F9FC),
       appBar: AppBar(
         title: const Text(
-          "Calendar",
+          "Jadwal Harian",
           style: TextStyle(
             fontWeight: FontWeight.w900,
-            fontSize: 24,
+            fontSize: 22,
             color: Colors.black87,
-            letterSpacing: 0.5,
+            letterSpacing: 0.3,
           ),
         ),
         centerTitle: false,
         backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         foregroundColor: Colors.black87,
         actions: [
@@ -50,20 +199,17 @@ class ScheduleResultScreen extends StatelessWidget {
           const SizedBox(width: 8),
         ],
       ),
-      body: SafeArea(
-        child: isJson
-            ? _buildCalendarView(data!)
-            : _buildFallbackView(context, scheduleResult),
-      ),
+      body: SafeArea(child: body),
     );
   }
 
-  Widget _buildCalendarView(Map<String, dynamic> data) {
+  // ============= JSON CALENDAR VIEW =============
+  Widget _buildCalendarView(BuildContext context, Map<String, dynamic> data) {
     final schedule = List<Map<String, dynamic>>.from(data['schedule'] ?? []);
-    final upcoming = List<Map<String, dynamic>>.from(data['upcoming'] ?? []);
+    final tips = data['tips'] as String? ?? '';
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -75,17 +221,17 @@ class ScheduleResultScreen extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Color(0xFF8121DA), // Deep Purple
-                  Color(0xFF4C22DC), // Deep Indigo
-                  Color(0xFF1E58E9), // Vibrant Blue
+                  Color(0xFF8121DA),
+                  Color(0xFF4C22DC),
+                  Color(0xFF1E58E9),
                 ],
               ),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF1E58E9).withOpacity(0.3),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
+                  color: const Color(0xFF4C22DC).withAlpha(77),
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
                 ),
               ],
             ),
@@ -93,7 +239,7 @@ class ScheduleResultScreen extends StatelessWidget {
               children: [
                 const SizedBox(height: 24),
                 const Text(
-                  "Daily schedule",
+                  "📅 Daily Schedule",
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 22,
@@ -125,72 +271,363 @@ class ScheduleResultScreen extends StatelessWidget {
               ],
             ),
           ),
-          
-          const SizedBox(height: 40),
-          
-          // Upcoming Section
-          if (upcoming.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(left: 10),
-              child: Column(
+
+          // Tips Section
+          if (tips.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(13),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    "Upcoming",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      color: Color(0xFF2E3A42),
+                  const Text("💡", style: TextStyle(fontSize: 22)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      tips,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF4A5568),
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  ...upcoming.map((e) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 20),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 60,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF1E58E9).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              e['date'] ?? '',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF1E58E9),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 20),
-                          Expanded(
-                            child: Text(
-                              e['title'] ?? '',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF4A5568),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
                 ],
               ),
             ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // Copy & Back Buttons
+          _buildActionButtons(context, () {
+            Clipboard.setData(ClipboardData(text: _buildCopyText(data)));
+            _showCopiedSnackbar(context);
+          }),
+
           const SizedBox(height: 40),
         ],
       ),
     );
   }
 
+  // ============= MARKDOWN TABLE VIEW =============
+  Widget _buildMarkdownTableView(BuildContext context, List<Map<String, String>> rows) {
+    final tips = _extractTips(scheduleResult);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Schedule Card
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF8121DA),
+                  Color(0xFF4C22DC),
+                  Color(0xFF1E58E9),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF4C22DC).withAlpha(77),
+                  blurRadius: 24,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                const SizedBox(height: 24),
+                const Text(
+                  "📅 Daily Schedule",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Table Rows as Timeline
+                ...rows.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final row = entry.value;
+                  final waktu = row['waktu'] ?? row['time'] ?? '';
+                  final aktivitas = row['aktivitas'] ?? row['activity'] ?? row['title'] ?? '';
+                  final durasi = row['durasi'] ?? row['duration'] ?? '';
+                  final prioritas = row['prioritas'] ?? row['priority'] ?? '';
+                  final isIstirahat = aktivitas.toLowerCase().contains('istirahat') ||
+                      aktivitas.toLowerCase().contains('break');
+
+                  // Parse time range
+                  String startTime = waktu;
+                  String endTime = '';
+                  if (waktu.contains('–') || waktu.contains('-')) {
+                    final parts = waktu.split(RegExp(r'[–\-]'));
+                    startTime = parts[0].trim();
+                    endTime = parts.length > 1 ? parts[1].trim() : '';
+                  }
+
+                  return _buildTimelineTile(
+                    time: startTime,
+                    endTime: endTime,
+                    title: aktivitas,
+                    subtitle: '$durasi • $prioritas',
+                    hasEvent: !isIstirahat,
+                    isFirst: index == 0,
+                    isLast: index == rows.length - 1,
+                  );
+                }),
+
+                const SizedBox(height: 20),
+              ],
+            ),
+          ),
+
+          // Tips Section
+          if (tips.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withAlpha(13),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("💡", style: TextStyle(fontSize: 22)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      tips,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF4A5568),
+                        fontWeight: FontWeight.w500,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // Copy & Back Buttons
+          _buildActionButtons(context, () {
+            Clipboard.setData(ClipboardData(text: _buildCopyTextFromTable(rows, tips)));
+            _showCopiedSnackbar(context);
+          }),
+
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  // ============= FALLBACK RAW TEXT VIEW =============
+  Widget _buildFallbackView(BuildContext context, String rawText) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Warning banner
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFFFFF4E5),
+                  const Color(0xFFFFF9F0),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFFE0B2)),
+            ),
+            child: Row(
+              children: [
+                const Text("⚠️", style: TextStyle(fontSize: 24)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: const Text(
+                    "Format AI tidak sesuai. Berikut respons mentahnya:",
+                    style: TextStyle(
+                      color: Color(0xFFF57C00),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Raw text in card
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withAlpha(13),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: SelectableText(
+              rawText,
+              style: const TextStyle(fontSize: 15, height: 1.6, color: Color(0xFF2E3A42)),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Copy & Back Buttons
+          _buildActionButtons(context, () {
+            Clipboard.setData(ClipboardData(text: rawText));
+            _showCopiedSnackbar(context);
+          }),
+
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  // ============= SHARED WIDGETS =============
+
+  Widget _buildActionButtons(BuildContext context, VoidCallback onCopy) {
+    return Column(
+      children: [
+        // Copy Button
+        SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF8121DA), Color(0xFF1E58E9)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF4C22DC).withAlpha(77),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ElevatedButton.icon(
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_rounded, size: 20, color: Colors.white),
+              label: const Text(
+                "Salin Jadwal",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        // Back Button
+        SizedBox(
+          width: double.infinity,
+          height: 54,
+          child: OutlinedButton.icon(
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back_rounded, size: 20),
+            label: const Text(
+              "Kembali",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                letterSpacing: 0.5,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF4C22DC),
+              side: const BorderSide(color: Color(0xFF4C22DC), width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showCopiedSnackbar(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+            SizedBox(width: 10),
+            Text(
+              "Jadwal berhasil disalin! ✨",
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF43A047),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  // ============= TIMELINE TILE =============
   Widget _buildTimelineTile({
     required String time,
     required String endTime,
@@ -201,7 +638,7 @@ class ScheduleResultScreen extends StatelessWidget {
     required bool isLast,
   }) {
     return Container(
-      color: hasEvent ? Colors.white.withOpacity(0.08) : Colors.transparent, // Highlight aktif lebih kentara
+      color: hasEvent ? Colors.white.withAlpha(20) : Colors.transparent,
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -238,7 +675,7 @@ class ScheduleResultScreen extends StatelessWidget {
                 ),
               ),
             ),
-            
+
             // Line & Dot
             SizedBox(
               width: 32,
@@ -248,13 +685,13 @@ class ScheduleResultScreen extends StatelessWidget {
                   Positioned(
                     top: isFirst ? 22 : 0,
                     bottom: isLast ? 22 : 0,
-                    width: 2.0, // Garis lebih tebal dikit
+                    width: 2.0,
                     child: Container(
-                      color: Colors.white.withOpacity(0.3),
+                      color: Colors.white.withAlpha(77),
                     ),
                   ),
                   Positioned(
-                    top: 20, // sejajarkan dengan teks jam
+                    top: 20,
                     child: Container(
                       width: 14,
                       height: 14,
@@ -262,20 +699,22 @@ class ScheduleResultScreen extends StatelessWidget {
                         color: hasEvent ? Colors.white : Colors.transparent,
                         shape: BoxShape.circle,
                         border: hasEvent ? null : Border.all(color: Colors.white70, width: 2),
-                        boxShadow: hasEvent ? [
-                          BoxShadow(
-                            color: Colors.white.withOpacity(0.5),
-                            blurRadius: 10,
-                            spreadRadius: 2,
-                          )
-                        ] : [],
+                        boxShadow: hasEvent
+                            ? [
+                                BoxShadow(
+                                  color: Colors.white.withAlpha(128),
+                                  blurRadius: 10,
+                                  spreadRadius: 2,
+                                )
+                              ]
+                            : [],
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            
+
             // Content
             Expanded(
               child: Padding(
@@ -297,7 +736,7 @@ class ScheduleResultScreen extends StatelessWidget {
                             Text(
                               subtitle,
                               style: TextStyle(
-                                color: Colors.white.withOpacity(0.85),
+                                color: Colors.white.withAlpha(217),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
                                 height: 1.3,
@@ -306,51 +745,11 @@ class ScheduleResultScreen extends StatelessWidget {
                           ],
                         ],
                       )
-                    : const SizedBox(height: 24), // height untuk item kosong
+                    : const SizedBox(height: 24),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // Jika AI gagal mengembalikan JSON atau ada error parsing
-  Widget _buildFallbackView(BuildContext context, String rawText) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF4E5), // Light orange/yellow error box
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: const Text(
-              "Oops, format AI tidak sesuai dengan JSON yang diharapkan. Berikut adalah respons mentahnya:",
-              style: TextStyle(color: Color(0xFFF57C00), fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(rawText, style: const TextStyle(fontSize: 16, height: 1.5)),
-          const SizedBox(height: 40),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4CB8B8),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-              ),
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Kembali", style: TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          )
-        ],
       ),
     );
   }

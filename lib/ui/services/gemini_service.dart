@@ -2,8 +2,8 @@ import 'dart:convert'; // Untuk encode/decode JSON
 import 'package:http/http.dart' as http;
 
 class GeminiService {
-  // API Key - GANTI dengan milikmu (jangan hardcode di production!)
-  static const String apiKey = "AIzaSyAlsKqYlTOP-NLi2HSVZzqZbmof8JQoAlE";
+  // API Key dibaca dari --dart-define (aman, tidak hardcode!)
+  static const String apiKey = String.fromEnvironment('GEMINI_API_KEY');
 
   // Gunakan model stabil terbaru
   static const String model = "gemini-2.5-flash";
@@ -19,17 +19,20 @@ class GeminiService {
     }).join('\n');
 
     return """
-Minta tolong buatkan jadwal harian berdasarkan data berikut:
+Buatkan jadwal harian berdasarkan data berikut:
 $taskList
 
-ATURAN WAJIB (HARUS DIIKUTI):
-1. Setiap aktivitas HANYA BOLEH MUNCUL 1 KALI di jadwal. JANGAN mengulang aktivitas yang sama berkali-kali!
+ATURAN WAJIB:
+1. Setiap aktivitas HANYA BOLEH MUNCUL 1 KALI. JANGAN mengulang!
 2. Urutkan prioritas (Tinggi → Sedang → Rendah).
-3. Sisipkan istirahat 10-15 mnt tiap 1-2 jam.
+3. Sisipkan istirahat 10-15 menit tiap 1-2 jam.
 4. Mulai jam 08:00 pagi.
-5. Output HANYA BEBERAPA KATA pembuka, lalu langsung TABEL MARKDOWN. JANGAN gunakan backticks (```) atau code block!
-6. Kolo tabel WAJIB: Waktu, Aktivitas, Durasi, Prioritas.
-7. SINGKAT & PADAT! Tips produktivitas di bawah tabel MAKSIMAL HANYA 2 KALIMAT PENDEK. Jangan buat poin-poin panjang!
+5. Beri tips produktivitas SINGKAT (maks 2 kalimat).
+
+FORMAT OUTPUT WAJIB JSON (TANPA backticks, TANPA markdown, HANYA JSON murni):
+{"schedule":[{"time":"08:00","endTime":"09:00","title":"Nama Aktivitas","subtitle":"60 menit • Tinggi","hasEvent":true,"priority":"Tinggi"},{"time":"09:00","endTime":"09:15","title":"Istirahat","subtitle":"15 menit","hasEvent":false,"priority":"-"}],"tips":"Tips singkat di sini."}
+
+PENTING: Output HANYA JSON valid. Tidak ada teks lain sebelum atau sesudah JSON. Tidak ada backticks. Tidak ada code block.
 """;
   }
 

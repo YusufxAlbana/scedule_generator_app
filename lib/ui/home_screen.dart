@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import 'services/gemini_service.dart'; // Service untuk memanggil AI
@@ -99,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           // Background Doodle Motif (PNG) - Animated Scrolling
           Positioned.fill(
             child: Opacity(
-              opacity: 0.5,
+              opacity: 0.07,
               child: AnimatedBuilder(
                 animation: _bgAnimationController,
                 builder: (context, child) {
@@ -197,20 +198,31 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
                 
                 // Card Utama Form Input
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: Container(
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: Colors.white.withOpacity(0.85),
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF1E58E9).withOpacity(0.08),
-                        blurRadius: 30,
-                        offset: const Offset(0, 15),
+                        color: Colors.black.withOpacity(0.10),
+                        blurRadius: 40,
+                        spreadRadius: 2,
+                        offset: const Offset(0, 12),
+                      ),
+                      BoxShadow(
+                        color: const Color(0xFF8121DA).withOpacity(0.06),
+                        blurRadius: 20,
+                        offset: const Offset(0, 4),
                       ),
                     ],
-                    border: Border.all(color: Colors.white, width: 2),
+                    border: Border.all(color: Colors.grey.shade200, width: 1),
                   ),
                   child: Column(
                     children: [
@@ -287,26 +299,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ],
                   ),
                 ),
+                  ),
+                ),
+                ),
                 const SizedBox(height: 24),
                 
                 // List Tugas
                 Expanded(
                   child: tasks.isEmpty
                       ? Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
-                            margin: const EdgeInsets.only(left: 24, right: 24, bottom: 60),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.95), // Background putih transparan tinggi agar tulisan terbaca
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 24, right: 24, bottom: 100),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(32),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.80),
                               borderRadius: BorderRadius.circular(32),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.08),
-                                  blurRadius: 24,
+                                  color: Colors.black.withOpacity(0.10),
+                                  blurRadius: 40,
+                                  spreadRadius: 2,
                                   offset: const Offset(0, 12),
                                 ),
+                                BoxShadow(
+                                  color: const Color(0xFF8121DA).withOpacity(0.06),
+                                  blurRadius: 20,
+                                  offset: const Offset(0, 4),
+                                ),
                               ],
-                              border: Border.all(color: Colors.white, width: 2),
+                              border: Border.all(color: Colors.grey.shade200, width: 1),
                             ),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -315,13 +341,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                 Container(
                                   padding: const EdgeInsets.all(24),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF1E58E9).withOpacity(0.1),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        const Color(0xFF8121DA).withOpacity(0.12),
+                                        const Color(0xFF4C22DC).withOpacity(0.08),
+                                      ],
+                                    ),
                                     shape: BoxShape.circle,
                                   ),
                                   child: const Icon(
                                     Icons.assignment_turned_in_rounded,
                                     size: 64,
-                                    color: Color(0xFF1E58E9),
+                                    color: Color(0xFF6B21DA),
                                   ),
                                 ),
                                 const SizedBox(height: 24),
@@ -341,8 +372,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                 ),
                               ],
                             ),
-                          ),
-                        )
+                            ),
+                                ),
+                              ),
+                            ),
+                          )
                       : ListView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           itemCount: tasks.length,
