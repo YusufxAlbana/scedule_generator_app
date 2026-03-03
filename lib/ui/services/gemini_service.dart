@@ -13,13 +13,13 @@ class GeminiService {
       "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent";
 
   // Bangun prompt dari data tugas
-  static String _buildPrompt(List<Map<String, dynamic>> tasks) {
+  static String _buildPrompt(List<Map<String, dynamic>> tasks, String dateStr) {
     final taskList = tasks.map((t) {
       return "- ${t['name']} (Durasi: ${t['duration']} menit, Prioritas: ${t['priority']})";
     }).join('\n');
 
     return """
-Buatkan jadwal harian berdasarkan data berikut:
+Buatkan jadwal harian untuk tanggal $dateStr berdasarkan data berikut:
 $taskList
 
 ATURAN WAJIB:
@@ -30,18 +30,19 @@ ATURAN WAJIB:
 5. Beri tips produktivitas SINGKAT (maks 2 kalimat).
 
 FORMAT OUTPUT WAJIB JSON (TANPA backticks, TANPA markdown, HANYA JSON murni):
-{"schedule":[{"time":"08:00","endTime":"09:00","title":"Nama Aktivitas","subtitle":"60 menit • Tinggi","hasEvent":true,"priority":"Tinggi"},{"time":"09:00","endTime":"09:15","title":"Istirahat","subtitle":"15 menit","hasEvent":false,"priority":"-"}],"tips":"Tips singkat di sini."}
+{"date":"$dateStr","schedule":[{"time":"08:00","endTime":"09:00","title":"Nama Aktivitas","subtitle":"60 menit • Tinggi","hasEvent":true,"priority":"Tinggi"},{"time":"09:00","endTime":"09:15","title":"Istirahat","subtitle":"15 menit","hasEvent":false,"priority":"-"}],"tips":"Tips singkat di sini."}
 
-PENTING: Output HANYA JSON valid. Tidak ada teks lain sebelum atau sesudah JSON. Tidak ada backticks. Tidak ada code block.
+PENTING: Output HANYA JSON valid. Format waktu dan jadwal harus masuk akal untuk satu hari, referensikan tanggal $dateStr pada jadwal jika perlu. Tidak ada teks lain sebelum atau sesudah JSON. Tidak ada backticks. Tidak ada code block.
 """;
   }
 
   static Future<String> generateSchedule(
     List<Map<String, dynamic>> tasks,
+    String dateStr,
   ) async {
     try {
       // Bangun prompt dari data tugas
-      final prompt = _buildPrompt(tasks);
+      final prompt = _buildPrompt(tasks, dateStr);
 
       // Siapkan URL dengan API key sebagai query param
       final url = Uri.parse('$baseUrl?key=$apiKey');
@@ -60,7 +61,8 @@ PENTING: Output HANYA JSON valid. Tidak ada teks lain sebelum atau sesudah JSON.
           "temperature": 0.7,
           "topK": 40,
           "topP": 0.95,
-          "maxOutputTokens": 4096,
+          "maxOutputTokens": 8192,
+          "responseMimeType": "application/json",
         },
       };
 

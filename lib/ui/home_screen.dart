@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'services/gemini_service.dart'; // Service untuk memanggil AI
 import 'schedule_result_screen.dart';
+import '../services/task_storage_service.dart'; // Local storage
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -22,6 +23,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   
   late AnimationController _bgAnimationController;
 
+  // Key untuk AnimatedList
+  final GlobalKey<AnimatedListState> _listKey = GlobalKey<AnimatedListState>();
+
   @override
   void initState() {
     super.initState();
@@ -29,6 +33,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       vsync: this,
       duration: const Duration(seconds: 40), // Pelan banget
     )..repeat(); // Looping non stop
+
+    // Muat tasks dari local storage
+    _loadSavedTasks();
+  }
+
+  /// Muat tasks yang tersimpan di local storage
+  Future<void> _loadSavedTasks() async {
+    final savedTasks = await TaskStorageService.loadTasks();
+    if (savedTasks.isNotEmpty && mounted) {
+      setState(() {
+        tasks.addAll(savedTasks);
+      });
+      // Animasi staggered saat load awal
+      for (int i = 0; i < savedTasks.length; i++) {
+        Future.delayed(Duration(milliseconds: 100 * i), () {
+          if (_listKey.currentState != null) {
+            _listKey.currentState!.insertItem(i, duration: const Duration(milliseconds: 400));
+          }
+        });
+      }
+    }
   }
 
   @override
@@ -45,14 +70,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (taskController.text.isNotEmpty &&
         durationController.text.isNotEmpty &&
         priority != null) {
+      final newTask = {
+        "name": taskController.text,
+        "priority": priority!,
+        "duration": int.tryParse(durationController.text) ?? 30,
+      };
       setState(() {
-        // Tambahkan data ke list
-        tasks.add({
-          "name": taskController.text,
-          "priority": priority!,
-          "duration": int.tryParse(durationController.text) ?? 30,
-        });
+        tasks.add(newTask);
       });
+      // Animasi insert
+      _listKey.currentState?.insertItem(
+        tasks.length - 1,
+        duration: const Duration(milliseconds: 400),
+      );
+      // Simpan ke local storage
+      TaskStorageService.saveTasks(tasks);
       // Reset form setelah input berhasil
       taskController.clear();
       durationController.clear();
@@ -60,18 +92,47 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  void _removeTask(int index) {
+    final removedTask = tasks[index];
+    setState(() {
+      tasks.removeAt(index);
+    });
+    // Animasi remove
+    _listKey.currentState?.removeItem(
+      index,
+      (context, animation) => _buildAnimatedTaskItem(removedTask, index, animation, removing: true),
+      duration: const Duration(milliseconds: 350),
+    );
+    // Simpan ke local storage
+    TaskStorageService.saveTasks(tasks);
+  }
+
+  String _formatDate(DateTime date) {
+    final List<String> months = [
+      "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+      "Jul", "Agu", "Sep", "Okt", "Nov", "Des"
+    ];
+    final List<String> days = [
+      "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"
+    ];
+    String dayName = days[date.weekday - 1];
+    String monthName = months[date.month - 1];
+    return "$dayName, ${date.day} $monthName ${date.year}";
+  }
+
   void _generateSchedule() async {
     // Jika belum ada tugas, tampilkan peringatan
     if (tasks.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("⚠ Harap tambahkan tugas dulu!")),
+        const SnackBar(content: Text("Harap tambahkan tugas dulu!")),
       );
       return;
     }
     setState(() => isLoading = true); // Aktifkan loading
     try {
-      // Proses asynchronous ke AI service
-      String schedule = await GeminiService.generateSchedule(tasks);
+      // Proses asynchronous ke AI service, gunakan tanggal hari ini
+      final String dateStr = _formatDate(DateTime.now());
+      String schedule = await GeminiService.generateSchedule(tasks, dateStr);
       if (!mounted) return; // Pastikan widget masih aktif
       // Navigasi ke halaman hasil
       Navigator.push(
@@ -89,6 +150,154 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       // Loading dimatikan baik sukses maupun gagal
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  /// Widget task item yang sudah di-animasi (untuk insert & remove)
+  Widget _buildAnimatedTaskItem(
+    Map<String, dynamic> task,
+    int index,
+    Animation<double> animation, {
+    bool removing = false,
+  }) {
+    final slideAnimation = Tween<Offset>(
+      begin: removing ? Offset.zero : const Offset(1.0, 0.0),
+      end: removing ? const Offset(-1.0, 0.0) : Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: animation,
+      curve: removing ? Curves.easeInBack : Curves.easeOutCubic,
+    ));
+
+    final fadeAnimation = Tween<double>(
+      begin: removing ? 1.0 : 0.0,
+      end: removing ? 0.0 : 1.0,
+    ).animate(CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeInOut,
+    ));
+
+    final scaleAnimation = Tween<double>(
+      begin: removing ? 1.0 : 0.85,
+      end: removing ? 0.85 : 1.0,
+    ).animate(CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+    ));
+
+    return SlideTransition(
+      position: slideAnimation,
+      child: FadeTransition(
+        opacity: fadeAnimation,
+        child: ScaleTransition(
+          scale: scaleAnimation,
+          child: _buildTaskCard(task, index, isAnimatingOut: removing),
+        ),
+      ),
+    );
+  }
+
+  /// Widget card untuk satu task item
+  Widget _buildTaskCard(Map<String, dynamic> task, int index, {bool isAnimatingOut = false}) {
+    return Dismissible(
+      key: Key(task['name'] + index.toString() + DateTime.now().millisecondsSinceEpoch.toString()),
+      direction: isAnimatingOut ? DismissDirection.none : DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: Colors.red.shade100,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Icon(Icons.delete_sweep_rounded, color: Colors.red.shade600, size: 28),
+      ),
+      onDismissed: (_) => _removeTask(index),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          border: Border.all(color: Colors.grey.shade100),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {},
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                // Indikator Warna Prioritas (Lebih mencolok)
+                Container(
+                  width: 12,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: _getColor(task['priority']),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task['name'],
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Color(0xFF2E3A42),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.access_time_rounded, size: 14, color: Colors.grey.shade500),
+                          const SizedBox(width: 4),
+                          Text(
+                            "${task['duration']} Menit",
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _getColor(task['priority']).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              task['priority'],
+                              style: TextStyle(
+                                color: _getColor(task['priority']),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close_rounded, color: Colors.grey.shade400, size: 22),
+                  onPressed: () => _removeTask(index),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -116,6 +325,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                      ),
                   );
                 },
+              ),
+            ),
+          ),
+          // Doodle tambahan dengan CustomPainter agar lebih hidup
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(
+                painter: _BackgroundDoodlePainter(),
               ),
             ),
           ),
@@ -226,6 +443,50 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                   child: Column(
                     children: [
+                      // Header kecil form
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E58E9).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.view_agenda_outlined,
+                              color: Color(0xFF1E58E9),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Tambahkan tugas harianmu",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF2E3A42),
+                                  ),
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  "Isi nama tugas, durasi, dan prioritas. Nanti AI akan bantu susun jadwal yang rapi.",
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
                       // Input Nama Tugas
                       _buildTextField(
                         controller: taskController,
@@ -302,189 +563,137 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                 ),
                 ),
-                const SizedBox(height: 24),
-                
-                // List Tugas
-                Expanded(
-                  child: tasks.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 24, right: 24, bottom: 100),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(32),
-                              child: BackdropFilter(
-                                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.80),
-                              borderRadius: BorderRadius.circular(32),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.10),
-                                  blurRadius: 40,
-                                  spreadRadius: 2,
-                                  offset: const Offset(0, 12),
-                                ),
-                                BoxShadow(
-                                  color: const Color(0xFF8121DA).withOpacity(0.06),
-                                  blurRadius: 20,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                              border: Border.all(color: Colors.grey.shade200, width: 1),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.all(24),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        const Color(0xFF8121DA).withOpacity(0.12),
-                                        const Color(0xFF4C22DC).withOpacity(0.08),
-                                      ],
-                                    ),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.assignment_turned_in_rounded,
-                                    size: 64,
-                                    color: Color(0xFF6B21DA),
-                                  ),
-                                ),
-                                const SizedBox(height: 24),
-                                Text(
-                                  "Belum ada tugas",
-                                  style: TextStyle(
-                                    color: Colors.grey.shade800, 
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  "Mulai tambahkan tugas pertamamu!",
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 15),
-                                ),
-                              ],
-                            ),
-                            ),
-                                ),
-                              ),
-                            ),
-                          )
-                      : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                          itemCount: tasks.length,
-                          itemBuilder: (context, index) {
-                            final task = tasks[index];
-                            return Dismissible(
-                              key: Key(task['name'] + index.toString()),
-                              direction: DismissDirection.endToStart,
-                              background: Container(
-                                alignment: Alignment.centerRight,
-                                margin: const EdgeInsets.only(bottom: 12),
-                                padding: const EdgeInsets.only(right: 20),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade100,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Icon(Icons.delete_sweep_rounded, color: Colors.red.shade600, size: 28),
-                              ),
-                              onDismissed: (_) => setState(() => tasks.removeAt(index)),
-                              child: Container(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: Colors.black.withOpacity(0.03),
-                                      blurRadius: 10,
-                                      offset: const Offset(0, 4),
-                                    ),
-                                  ],
-                                  border: Border.all(color: Colors.grey.shade100),
-                                ),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
-                                  onTap: () {},
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Row(
-                                      children: [
-                                        // Indikator Warna Prioritas (Lebih mencolok)
-                                        Container(
-                                          width: 12,
-                                          height: 40,
-                                          decoration: BoxDecoration(
-                                            color: _getColor(task['priority']),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 16),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                task['name'],
-                                                style: const TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 16,
-                                                  color: Color(0xFF2E3A42),
-                                                ),
-                                              ),
-                                              const SizedBox(height: 6),
-                                              Row(
-                                                children: [
-                                                  Icon(Icons.access_time_rounded, size: 14, color: Colors.grey.shade500),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    "${task['duration']} Menit",
-                                                    style: TextStyle(
-                                                      color: Colors.grey.shade600,
-                                                      fontSize: 13,
-                                                      fontWeight: FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 12),
-                                                  Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: _getColor(task['priority']).withOpacity(0.1),
-                                                      borderRadius: BorderRadius.circular(20),
-                                                    ),
-                                                    child: Text(
-                                                      task['priority'],
-                                                      style: TextStyle(
-                                                        color: _getColor(task['priority']),
-                                                        fontSize: 11,
-                                                        fontWeight: FontWeight.bold,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        IconButton(
-                                          icon: Icon(Icons.close_rounded, color: Colors.grey.shade400, size: 22),
-                                          onPressed: () => setState(() => tasks.removeAt(index)),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
+                const SizedBox(height: 18),
+
+                // Ringkasan kecil sebelum list
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      const Text(
+                        "Daftar Tugas",
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF111827),
                         ),
+                      ),
+                      const Spacer(),
+                      if (tasks.isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E58E9).withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.list_alt_outlined, size: 14, color: Color(0xFF1E58E9)),
+                              const SizedBox(width: 6),
+                              Text(
+                                "${tasks.length} tugas",
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1E58E9),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // List Tugas dengan AnimatedList
+                Expanded(
+                  child: Stack(
+                    children: [
+                      AnimatedList(
+                        key: _listKey,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        initialItemCount: 0, // Items animate in via _loadSavedTasks dan _addTask
+                        itemBuilder: (context, index, animation) {
+                          if (index >= tasks.length) return const SizedBox.shrink();
+                          return _buildAnimatedTaskItem(tasks[index], index, animation);
+                        },
+                      ),
+                      if (tasks.isEmpty)
+                        Center(
+                          child: SingleChildScrollView(
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: BackdropFilter(
+                                  filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withOpacity(0.80),
+                                      borderRadius: BorderRadius.circular(24),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.10),
+                                          blurRadius: 40,
+                                          spreadRadius: 2,
+                                          offset: const Offset(0, 12),
+                                        ),
+                                        BoxShadow(
+                                          color: const Color(0xFF8121DA).withOpacity(0.06),
+                                          blurRadius: 20,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                      border: Border.all(color: Colors.grey.shade200, width: 1),
+                                    ),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                const Color(0xFF8121DA).withOpacity(0.12),
+                                                const Color(0xFF4C22DC).withOpacity(0.08),
+                                              ],
+                                            ),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.assignment_turned_in_rounded,
+                                            size: 48,
+                                            color: Color(0xFF6B21DA),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        Text(
+                                          "Belum ada tugas",
+                                          style: TextStyle(
+                                            color: Colors.grey.shade800, 
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          "Mulai tambahkan tugas pertamamu!",
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),
